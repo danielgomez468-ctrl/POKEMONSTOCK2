@@ -5,38 +5,61 @@ import time
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
+from urllib.parse import urljoin
 
 INTERVALO = 120
+
+PRODUCTO = "30th Celebration Elite Trainer Box"
 
 ejecutando = False
 hilo_monitor = None
 
-# ==========================================
-# PRODUCTO QUE QUEREMOS VIGILAR
-# ==========================================
 
-PRODUCTO = "Pokémon TCG 30th Anniversary Elite Trainer Box"
-
-
-# ==========================================
+# =========================================================
 # TIENDAS
-# ==========================================
+# =========================================================
 
 TIENDAS = [
     {
-        "nombre": "Pokemillon",
+        "nombre": "POKEMILLON",
         "url": "https://www.pokemillon.com/",
     },
     {
-        "nombre": "TodoHits",
+        "nombre": "TODOHITS",
         "url": "https://todohits.com/",
+    },
+    {
+        "nombre": "POKEBANK",
+        "url": "https://pokebank.es/",
+    },
+    {
+        "nombre": "SUNNY STORE",
+        "url": "https://sunnystore.es/",
+    },
+    {
+        "nombre": "UN SOBRE MÁS",
+        "url": "https://unsobremas.com/",
     },
 ]
 
 
-# ==========================================
-# COMPROBAR INTERNET / WEB
-# ==========================================
+# =========================================================
+# CONFIGURACIÓN DE PETICIONES
+# =========================================================
+
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 "
+        "(KHTML, like Gecko) "
+        "Chrome/151.0 Safari/537.36"
+    )
+}
+
+
+# =========================================================
+# BUSCAR PRODUCTO EN UNA TIENDA
+# =========================================================
 
 def comprobar_tienda(tienda):
 
@@ -44,19 +67,12 @@ def comprobar_tienda(tienda):
 
         respuesta = requests.get(
             tienda["url"],
-            timeout=20,
-            headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 "
-                    "(KHTML, like Gecko) "
-                    "Chrome/151.0 Safari/537.36"
-                )
-            },
+            headers=HEADERS,
+            timeout=20
         )
 
         if respuesta.status_code != 200:
-            return "ERROR"
+            return "ERROR", tienda["url"]
 
         soup = BeautifulSoup(
             respuesta.text,
@@ -68,25 +84,99 @@ def comprobar_tienda(tienda):
             strip=True
         ).lower()
 
-        if (
-            "30th anniversary" in texto
-            or "30th celebration" in texto
-        ):
+        # Palabras relacionadas con el producto
+        palabras_producto = [
+            "30th celebration",
+            "30th anniversary",
+            "30 aniversario",
+            "celebrations 30",
+        ]
 
-            return "PRODUCTO ENCONTRADO"
+        encontrado = False
 
-        return "NO ENCONTRADO"
+        for palabra in palabras_producto:
+
+            if palabra in texto:
+
+                encontrado = True
+                break
+
+        if not encontrado:
+
+            return "NO ENCONTRADO", tienda["url"]
+
+
+        # =================================================
+        # BUSCAR INDICIOS DE DISPONIBILIDAD
+        # =================================================
+
+        palabras_agotado = [
+            "agotado",
+            "agouté",
+            "sold out",
+            "sin existencias",
+            "sin stock",
+            "out of stock",
+            "no disponible",
+        ]
+
+        palabras_compra = [
+            "añadir al carrito",
+            "agregar al carrito",
+            "add to cart",
+            "comprar",
+            "buy now",
+            "pre-order",
+            "preorder",
+            "preventa",
+        ]
+
+
+        agotado = False
+
+        for palabra in palabras_agotado:
+
+            if palabra in texto:
+
+                agotado = True
+                break
+
+
+        disponible = False
+
+        for palabra in palabras_compra:
+
+            if palabra in texto:
+
+                disponible = True
+                break
+
+
+        # =================================================
+        # RESULTADO
+        # =================================================
+
+        if disponible and not agotado:
+
+            return "DISPONIBLE", tienda["url"]
+
+        if agotado:
+
+            return "AGOTADO", tienda["url"]
+
+        return "PRODUCTO ENCONTRADO", tienda["url"]
+
 
     except Exception:
 
-        return "ERROR"
+        return "ERROR", tienda["url"]
 
 
-# ==========================================
-# ACTUALIZAR PANTALLA
-# ==========================================
+# =========================================================
+# ACTUALIZAR ESTADO
+# =========================================================
 
-def actualizar_tienda(nombre, estado):
+def actualizar_estado(nombre, estado, url):
 
     for fila in filas:
 
@@ -96,10 +186,16 @@ def actualizar_tienda(nombre, estado):
                 text=estado
             )
 
-            if estado == "PRODUCTO ENCONTRADO":
+            if estado == "DISPONIBLE":
 
                 fila["estado"].config(
                     fg="green"
+                )
+
+            elif estado == "AGOTADO":
+
+                fila["estado"].config(
+                    fg="red"
                 )
 
             elif estado == "ERROR":
@@ -108,16 +204,22 @@ def actualizar_tienda(nombre, estado):
                     fg="orange"
                 )
 
+            elif estado == "PRODUCTO ENCONTRADO":
+
+                fila["estado"].config(
+                    fg="blue"
+                )
+
             else:
 
                 fila["estado"].config(
-                    fg="red"
+                    fg="gray"
                 )
 
 
-# ==========================================
-# COMPROBAR TODAS LAS TIENDAS
-# ==========================================
+# =========================================================
+# MONITOR PRINCIPAL
+# =========================================================
 
 def monitor():
 
@@ -137,28 +239,44 @@ def monitor():
             )
         )
 
+
         for tienda in TIENDAS:
 
             if not ejecutando:
                 break
 
-            estado = comprobar_tienda(
+            estado, url = comprobar_tienda(
                 tienda
             )
 
             ventana.after(
                 0,
                 lambda n=tienda["nombre"],
-                e=estado:
-                actualizar_tienda(
+                e=estado,
+                u=url:
+                actualizar_estado(
                     n,
-                    e
+                    e,
+                    u
                 )
             )
 
-        # ==================================
-        # CUENTA ATRÁS DE 2 MINUTOS
-        # ==================================
+            # =============================================
+            # AVISO SI ENCUENTRA DISPONIBILIDAD
+            # =============================================
+
+            if estado == "DISPONIBLE":
+
+                ventana.after(
+                    0,
+                    lambda n=tienda["nombre"]:
+                    mostrar_aviso(n)
+                )
+
+
+        # =================================================
+        # ESPERA DE 2 MINUTOS
+        # =================================================
 
         for segundos in range(
             INTERVALO,
@@ -188,9 +306,28 @@ def monitor():
             time.sleep(1)
 
 
-# ==========================================
+# =========================================================
+# AVISO
+# =========================================================
+
+def mostrar_aviso(tienda):
+
+    ventana.bell()
+
+    messagebox.showwarning(
+        "🚨 STOCK DETECTADO",
+        (
+            "¡POSIBLE STOCK DETECTADO!\n\n"
+            f"Tienda: {tienda}\n\n"
+            "Pokémon TCG 30th Celebration\n"
+            "Elite Trainer Box"
+        )
+    )
+
+
+# =========================================================
 # INICIAR
-# ==========================================
+# =========================================================
 
 def iniciar():
 
@@ -215,9 +352,9 @@ def iniciar():
     hilo_monitor.start()
 
 
-# ==========================================
+# =========================================================
 # DETENER
-# ==========================================
+# =========================================================
 
 def detener():
 
@@ -235,9 +372,9 @@ def detener():
     )
 
 
-# ==========================================
+# =========================================================
 # CERRAR
-# ==========================================
+# =========================================================
 
 def cerrar():
 
@@ -248,9 +385,9 @@ def cerrar():
     ventana.destroy()
 
 
-# ==========================================
+# =========================================================
 # INTERFAZ
-# ==========================================
+# =========================================================
 
 ventana = tk.Tk()
 
@@ -259,7 +396,7 @@ ventana.title(
 )
 
 ventana.geometry(
-    "700x520"
+    "750x650"
 )
 
 ventana.resizable(
@@ -271,7 +408,7 @@ ventana.resizable(
 titulo = tk.Label(
     ventana,
     text="POKEMONSTOCK",
-    font=("Arial", 28, "bold")
+    font=("Arial", 30, "bold")
 )
 
 titulo.pack(
@@ -281,12 +418,23 @@ titulo.pack(
 
 subtitulo = tk.Label(
     ventana,
-    text="Monitor Pokémon TCG - 30 Aniversario",
-    font=("Arial", 13)
+    text="Pokémon TCG - 30th Anniversary",
+    font=("Arial", 14)
 )
 
 subtitulo.pack(
     pady=(0, 25)
+)
+
+
+producto = tk.Label(
+    ventana,
+    text="Elite Trainer Box",
+    font=("Arial", 12, "bold")
+)
+
+producto.pack(
+    pady=(0, 20)
 )
 
 
@@ -296,7 +444,7 @@ marco = tk.Frame(
 
 marco.pack(
     fill="x",
-    padx=40
+    padx=50
 )
 
 
@@ -318,7 +466,7 @@ tk.Label(
 ).grid(
     row=0,
     column=1,
-    padx=100,
+    padx=150,
     sticky="w"
 )
 
@@ -341,7 +489,7 @@ for numero, tienda in enumerate(
         row=numero,
         column=0,
         sticky="w",
-        pady=10
+        pady=12
     )
 
 
@@ -355,7 +503,7 @@ for numero, tienda in enumerate(
     estado.grid(
         row=numero,
         column=1,
-        padx=100,
+        padx=150,
         sticky="w"
     )
 
@@ -376,7 +524,7 @@ separador = tk.Frame(
 
 separador.pack(
     fill="x",
-    padx=40,
+    padx=50,
     pady=20
 )
 

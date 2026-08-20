@@ -27,7 +27,7 @@ jobs:
           pyinstaller --onefile --windowed --name PokemonStockMonitor app.py
 
       - name: Guardar EXE
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: PokemonStockMonitor
           path: dist/PokemonStockMonitor.exe

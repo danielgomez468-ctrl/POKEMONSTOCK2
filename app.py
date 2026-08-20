@@ -4,10 +4,24 @@ import threading
 import time
 import requests
 from bs4 import BeautifulSoup
+from datetime import datetime
 
-INTERVALO = 120  # 2 minutos
+INTERVALO = 120
 
-# Tiendas que vigilaremos
+ejecutando = False
+hilo_monitor = None
+
+# ==========================================
+# PRODUCTO QUE QUEREMOS VIGILAR
+# ==========================================
+
+PRODUCTO = "Pokémon TCG 30th Anniversary Elite Trainer Box"
+
+
+# ==========================================
+# TIENDAS
+# ==========================================
+
 TIENDAS = [
     {
         "nombre": "Pokemillon",
@@ -19,27 +33,24 @@ TIENDAS = [
     },
 ]
 
-producto_buscado = "30th Celebration Elite Trainer Box"
 
-ejecutando = False
-hilo = None
-
+# ==========================================
+# COMPROBAR INTERNET / WEB
+# ==========================================
 
 def comprobar_tienda(tienda):
-    """
-    Comprueba si la página contiene referencias al producto.
-    Más adelante sustituiremos estas URL por las fichas exactas
-    de la ETB.
-    """
 
     try:
+
         respuesta = requests.get(
             tienda["url"],
             timeout=20,
             headers={
                 "User-Agent": (
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 Chrome/151.0 Safari/537.36"
+                    "AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) "
+                    "Chrome/151.0 Safari/537.36"
                 )
             },
         )
@@ -47,48 +58,81 @@ def comprobar_tienda(tienda):
         if respuesta.status_code != 200:
             return "ERROR"
 
-        texto = respuesta.text.lower()
+        soup = BeautifulSoup(
+            respuesta.text,
+            "html.parser"
+        )
 
-        palabras = [
-            "30th celebration",
-            "30th anniversary",
-            "elite trainer box",
-        ]
+        texto = soup.get_text(
+            " ",
+            strip=True
+        ).lower()
 
-        encontrado = any(palabra in texto for palabra in palabras)
+        if (
+            "30th anniversary" in texto
+            or "30th celebration" in texto
+        ):
 
-        if encontrado:
-            return "ENCONTRADO"
+            return "PRODUCTO ENCONTRADO"
 
         return "NO ENCONTRADO"
 
     except Exception:
+
         return "ERROR"
 
 
-def actualizar_estado(tienda, estado):
+# ==========================================
+# ACTUALIZAR PANTALLA
+# ==========================================
+
+def actualizar_tienda(nombre, estado):
+
     for fila in filas:
-        if fila["nombre"] == tienda["nombre"]:
-            fila["estado"].config(text=estado)
 
-            if estado == "DISPONIBLE":
-                fila["estado"].config(fg="green")
+        if fila["nombre"] == nombre:
+
+            fila["estado"].config(
+                text=estado
+            )
+
+            if estado == "PRODUCTO ENCONTRADO":
+
+                fila["estado"].config(
+                    fg="green"
+                )
+
             elif estado == "ERROR":
-                fila["estado"].config(fg="orange")
+
+                fila["estado"].config(
+                    fg="orange"
+                )
+
             else:
-                fila["estado"].config(fg="red")
+
+                fila["estado"].config(
+                    fg="red"
+                )
 
 
-def comprobar_todas():
+# ==========================================
+# COMPROBAR TODAS LAS TIENDAS
+# ==========================================
+
+def monitor():
+
     global ejecutando
 
     while ejecutando:
 
-        hora = time.strftime("%H:%M:%S")
+        hora = datetime.now().strftime(
+            "%H:%M:%S"
+        )
 
         ventana.after(
             0,
-            lambda h=hora: ultima_comprobacion.config(
+            lambda h=hora:
+            ultima_comprobacion.config(
                 text=f"Última comprobación: {h}"
             )
         )
@@ -98,32 +142,60 @@ def comprobar_todas():
             if not ejecutando:
                 break
 
-            estado = comprobar_tienda(tienda)
+            estado = comprobar_tienda(
+                tienda
+            )
 
             ventana.after(
                 0,
-                lambda t=tienda, e=estado: actualizar_estado(t, e)
+                lambda n=tienda["nombre"],
+                e=estado:
+                actualizar_tienda(
+                    n,
+                    e
+                )
             )
 
-        for segundos in range(INTERVALO):
+        # ==================================
+        # CUENTA ATRÁS DE 2 MINUTOS
+        # ==================================
+
+        for segundos in range(
+            INTERVALO,
+            0,
+            -1
+        ):
 
             if not ejecutando:
                 break
 
-            restante = INTERVALO - segundos
+            minutos = segundos // 60
+            seg = segundos % 60
+
+            texto = (
+                f"Próxima comprobación: "
+                f"{minutos:02d}:{seg:02d}"
+            )
 
             ventana.after(
                 0,
-                lambda r=restante: proxima_comprobacion.config(
-                    text=f"Próxima comprobación: {r} segundos"
+                lambda t=texto:
+                proxima_comprobacion.config(
+                    text=t
                 )
             )
 
             time.sleep(1)
 
 
+# ==========================================
+# INICIAR
+# ==========================================
+
 def iniciar():
-    global ejecutando, hilo
+
+    global ejecutando
+    global hilo_monitor
 
     if ejecutando:
         return
@@ -135,15 +207,20 @@ def iniciar():
         fg="green"
     )
 
-    hilo = threading.Thread(
-        target=comprobar_todas,
+    hilo_monitor = threading.Thread(
+        target=monitor,
         daemon=True
     )
 
-    hilo.start()
+    hilo_monitor.start()
 
+
+# ==========================================
+# DETENER
+# ==========================================
 
 def detener():
+
     global ejecutando
 
     ejecutando = False
@@ -158,22 +235,38 @@ def detener():
     )
 
 
-def cerrar_programa():
+# ==========================================
+# CERRAR
+# ==========================================
+
+def cerrar():
+
     global ejecutando
 
     ejecutando = False
+
     ventana.destroy()
 
 
-# -----------------------------
+# ==========================================
 # INTERFAZ
-# -----------------------------
+# ==========================================
 
 ventana = tk.Tk()
 
-ventana.title("POKEMONSTOCK")
-ventana.geometry("650x500")
-ventana.resizable(False, False)
+ventana.title(
+    "POKEMONSTOCK"
+)
+
+ventana.geometry(
+    "700x520"
+)
+
+ventana.resizable(
+    False,
+    False
+)
+
 
 titulo = tk.Label(
     ventana,
@@ -181,7 +274,10 @@ titulo = tk.Label(
     font=("Arial", 28, "bold")
 )
 
-titulo.pack(pady=(20, 5))
+titulo.pack(
+    pady=(25, 5)
+)
+
 
 subtitulo = tk.Label(
     ventana,
@@ -189,34 +285,51 @@ subtitulo = tk.Label(
     font=("Arial", 13)
 )
 
-subtitulo.pack(pady=(0, 20))
+subtitulo.pack(
+    pady=(0, 25)
+)
 
 
-marco = tk.Frame(ventana)
-marco.pack(fill="x", padx=30)
+marco = tk.Frame(
+    ventana
+)
+
+marco.pack(
+    fill="x",
+    padx=40
+)
 
 
-cabecera_nombre = tk.Label(
+tk.Label(
     marco,
     text="TIENDA",
     font=("Arial", 11, "bold")
+).grid(
+    row=0,
+    column=0,
+    sticky="w"
 )
 
-cabecera_nombre.grid(row=0, column=0, sticky="w", pady=5)
 
-
-cabecera_estado = tk.Label(
+tk.Label(
     marco,
     text="ESTADO",
     font=("Arial", 11, "bold")
+).grid(
+    row=0,
+    column=1,
+    padx=100,
+    sticky="w"
 )
-
-cabecera_estado.grid(row=0, column=1, sticky="w", padx=100)
 
 
 filas = []
 
-for i, tienda in enumerate(TIENDAS, start=1):
+
+for numero, tienda in enumerate(
+    TIENDAS,
+    start=1
+):
 
     nombre = tk.Label(
         marco,
@@ -225,11 +338,12 @@ for i, tienda in enumerate(TIENDAS, start=1):
     )
 
     nombre.grid(
-        row=i,
+        row=numero,
         column=0,
         sticky="w",
-        pady=8
+        pady=10
     )
+
 
     estado = tk.Label(
         marco,
@@ -239,11 +353,12 @@ for i, tienda in enumerate(TIENDAS, start=1):
     )
 
     estado.grid(
-        row=i,
+        row=numero,
         column=1,
-        sticky="w",
-        padx=100
+        padx=100,
+        sticky="w"
     )
+
 
     filas.append(
         {
@@ -261,7 +376,7 @@ separador = tk.Frame(
 
 separador.pack(
     fill="x",
-    padx=30,
+    padx=40,
     pady=20
 )
 
@@ -273,7 +388,9 @@ estado_programa = tk.Label(
     fg="red"
 )
 
-estado_programa.pack(pady=5)
+estado_programa.pack(
+    pady=5
+)
 
 
 ultima_comprobacion = tk.Label(
@@ -282,7 +399,9 @@ ultima_comprobacion = tk.Label(
     font=("Arial", 10)
 )
 
-ultima_comprobacion.pack(pady=3)
+ultima_comprobacion.pack(
+    pady=3
+)
 
 
 proxima_comprobacion = tk.Label(
@@ -291,37 +410,40 @@ proxima_comprobacion = tk.Label(
     font=("Arial", 10)
 )
 
-proxima_comprobacion.pack(pady=3)
+proxima_comprobacion.pack(
+    pady=3
+)
 
 
-marco_botones = tk.Frame(ventana)
-marco_botones.pack(pady=25)
+marco_botones = tk.Frame(
+    ventana
+)
+
+marco_botones.pack(
+    pady=25
+)
 
 
-boton_iniciar = tk.Button(
+tk.Button(
     marco_botones,
     text="▶ INICIAR",
     font=("Arial", 12, "bold"),
-    width=15,
+    width=16,
     command=iniciar
-)
-
-boton_iniciar.grid(
+).grid(
     row=0,
     column=0,
     padx=10
 )
 
 
-boton_detener = tk.Button(
+tk.Button(
     marco_botones,
     text="■ DETENER",
     font=("Arial", 12, "bold"),
-    width=15,
+    width=16,
     command=detener
-)
-
-boton_detener.grid(
+).grid(
     row=0,
     column=1,
     padx=10
@@ -330,7 +452,8 @@ boton_detener.grid(
 
 ventana.protocol(
     "WM_DELETE_WINDOW",
-    cerrar_programa
+    cerrar
 )
+
 
 ventana.mainloop()

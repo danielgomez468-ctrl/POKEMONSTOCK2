@@ -5,14 +5,29 @@ import time
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
-from urllib.parse import urljoin
+
+
+# =========================================================
+# CONFIGURACIÓN
+# =========================================================
 
 INTERVALO = 3
 
-PRODUCTO = "30th Celebration Elite Trainer Box"
+PRODUCTO = [
+    "30th celebration elite trainer box",
+    "30th celebration etb",
+    "30th anniversary elite trainer box",
+    "30th anniversary etb",
+    "etb celebraciones 30 aniversario",
+    "elite trainer box 30th",
+]
 
 ejecutando = False
 hilo_monitor = None
+
+contador_comprobaciones = 0
+
+estados_anteriores = {}
 
 
 # =========================================================
@@ -21,8 +36,8 @@ hilo_monitor = None
 
 TIENDAS = [
     {
-         "nombre": "POKEMILLON",
-    "url": "https://www.pokemillon.com/products/etb-30th",
+        "nombre": "POKEMILLON",
+        "url": "https://www.pokemillon.com/products/etb-30th",
     },
     {
         "nombre": "TODOHITS",
@@ -44,7 +59,7 @@ TIENDAS = [
 
 
 # =========================================================
-# CONFIGURACIÓN DE PETICIONES
+# CABECERAS
 # =========================================================
 
 HEADERS = {
@@ -53,12 +68,102 @@ HEADERS = {
         "AppleWebKit/537.36 "
         "(KHTML, like Gecko) "
         "Chrome/151.0 Safari/537.36"
-    )
+    ),
+    "Accept": (
+        "text/html,application/xhtml+xml,"
+        "application/xml;q=0.9,image/avif,"
+        "image/webp,*/*;q=0.8"
+    ),
+    "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
 }
 
 
 # =========================================================
-# BUSCAR PRODUCTO EN UNA TIENDA
+# COMPROBAR SI EL PRODUCTO APARECE
+# =========================================================
+
+def producto_aparece(texto):
+
+    texto = texto.lower()
+
+    for palabra in PRODUCTO:
+
+        if palabra in texto:
+            return True
+
+    if (
+        "30th anniversary" in texto
+        and "elite trainer box" in texto
+    ):
+        return True
+
+    if (
+        "30th celebration" in texto
+        and "elite trainer box" in texto
+    ):
+        return True
+
+    if (
+        "30 aniversario" in texto
+        and "elite trainer box" in texto
+    ):
+        return True
+
+    return False
+
+
+# =========================================================
+# COMPROBAR AGOTADO
+# =========================================================
+
+def esta_agotado(texto):
+
+    texto = texto.lower()
+
+    palabras = [
+        "agotado",
+        "agotada",
+        "sold out",
+        "out of stock",
+        "sin stock",
+        "sin existencias",
+        "no disponible",
+    ]
+
+    for palabra in palabras:
+
+        if palabra in texto:
+            return True
+
+    return False
+
+
+# =========================================================
+# COMPROBAR DISPONIBLE
+# =========================================================
+
+def esta_disponible(texto):
+
+    texto = texto.lower()
+
+    palabras = [
+        "en stock",
+        "in stock",
+        "disponible",
+        "hay existencias",
+        "en existencia",
+    ]
+
+    for palabra in palabras:
+
+        if palabra in texto:
+            return True
+
+    return False
+
+
+# =========================================================
+# COMPROBAR UNA TIENDA
 # =========================================================
 
 def comprobar_tienda(tienda):
@@ -72,7 +177,7 @@ def comprobar_tienda(tienda):
         )
 
         if respuesta.status_code != 200:
-            return "ERROR", tienda["url"]
+            return "ERROR"
 
         soup = BeautifulSoup(
             respuesta.text,
@@ -84,99 +189,40 @@ def comprobar_tienda(tienda):
             strip=True
         ).lower()
 
-        # Palabras relacionadas con el producto
-        palabras_producto = [
-            "30th celebration",
-            "30th anniversary",
-            "30 aniversario",
-            "celebrations 30",
-        ]
+        # Producto no encontrado
+        if not producto_aparece(texto):
+            return "NO ENCONTRADO"
 
-        encontrado = False
+        # Producto publicado pero agotado
+        if esta_agotado(texto):
+            return "AGOTADO"
 
-        for palabra in palabras_producto:
+        # Producto publicado y disponible
+        if esta_disponible(texto):
+            return "EN STOCK"
 
-            if palabra in texto:
+        # Producto publicado pero no podemos
+        # determinar claramente el stock
+        return "PUBLICADO"
 
-                encontrado = True
-                break
+    except requests.exceptions.Timeout:
 
-        if not encontrado:
+        return "ERROR"
 
-            return "NO ENCONTRADO", tienda["url"]
+    except requests.exceptions.ConnectionError:
 
-
-        # =================================================
-        # BUSCAR INDICIOS DE DISPONIBILIDAD
-        # =================================================
-
-        palabras_agotado = [
-            "agotado",
-            "agouté",
-            "sold out",
-            "sin existencias",
-            "sin stock",
-            "out of stock",
-            "no disponible",
-        ]
-
-        palabras_compra = [
-            "añadir al carrito",
-            "agregar al carrito",
-            "add to cart",
-            "comprar",
-            "buy now",
-            "pre-order",
-            "preorder",
-            "preventa",
-        ]
-
-
-        agotado = False
-
-        for palabra in palabras_agotado:
-
-            if palabra in texto:
-
-                agotado = True
-                break
-
-
-        disponible = False
-
-        for palabra in palabras_compra:
-
-            if palabra in texto:
-
-                disponible = True
-                break
-
-
-        # =================================================
-        # RESULTADO
-        # =================================================
-
-        if disponible and not agotado:
-
-            return "DISPONIBLE", tienda["url"]
-
-        if agotado:
-
-            return "AGOTADO", tienda["url"]
-
-        return "PRODUCTO ENCONTRADO", tienda["url"]
-
+        return "ERROR"
 
     except Exception:
 
-        return "ERROR", tienda["url"]
+        return "ERROR"
 
 
 # =========================================================
-# ACTUALIZAR ESTADO
+# ACTUALIZAR ESTADO EN PANTALLA
 # =========================================================
 
-def actualizar_estado(nombre, estado, url):
+def actualizar_estado(nombre, estado):
 
     for fila in filas:
 
@@ -186,7 +232,7 @@ def actualizar_estado(nombre, estado, url):
                 text=estado
             )
 
-            if estado == "DISPONIBLE":
+            if estado == "EN STOCK":
 
                 fila["estado"].config(
                     fg="green"
@@ -198,23 +244,55 @@ def actualizar_estado(nombre, estado, url):
                     fg="red"
                 )
 
+            elif estado == "PUBLICADO":
+
+                fila["estado"].config(
+                    fg="blue"
+                )
+
+            elif estado == "NO ENCONTRADO":
+
+                fila["estado"].config(
+                    fg="gray"
+                )
+
             elif estado == "ERROR":
 
                 fila["estado"].config(
                     fg="orange"
                 )
 
-            elif estado == "PRODUCTO ENCONTRADO":
 
-                fila["estado"].config(
-                    fg="blue"
-                )
+# =========================================================
+# AVISO DE CAMBIO
+# =========================================================
 
-            else:
+def avisar_cambio(
+    nombre,
+    estado_anterior,
+    estado_nuevo
+):
 
-                fila["estado"].config(
-                    fg="gray"
-                )
+    if estado_anterior is None:
+        return
+
+    if estado_anterior == estado_nuevo:
+        return
+
+    mensaje = (
+        f"{nombre}\n\n"
+        f"Estado anterior:\n"
+        f"{estado_anterior}\n\n"
+        f"Nuevo estado:\n"
+        f"{estado_nuevo}"
+    )
+
+    ventana.bell()
+
+    messagebox.showwarning(
+        "CAMBIO DETECTADO",
+        mensaje
+    )
 
 
 # =========================================================
@@ -224,6 +302,7 @@ def actualizar_estado(nombre, estado, url):
 def monitor():
 
     global ejecutando
+    global contador_comprobaciones
 
     while ejecutando:
 
@@ -239,43 +318,71 @@ def monitor():
             )
         )
 
+        # =================================================
+        # COMPROBAR LAS 5 TIENDAS
+        # =================================================
 
         for tienda in TIENDAS:
 
             if not ejecutando:
                 break
 
-            estado, url = comprobar_tienda(
+            nombre = tienda["nombre"]
+
+            estado = comprobar_tienda(
                 tienda
             )
 
+            estado_anterior = (
+                estados_anteriores.get(nombre)
+            )
+
+            estados_anteriores[nombre] = estado
+
+            # Actualizar pantalla
             ventana.after(
                 0,
-                lambda n=tienda["nombre"],
-                e=estado,
-                u=url:
+                lambda n=nombre,
+                e=estado:
                 actualizar_estado(
                     n,
-                    e,
-                    u
+                    e
                 )
             )
 
-            # =============================================
-            # AVISO SI ENCUENTRA DISPONIBILIDAD
-            # =============================================
-
-            if estado == "DISPONIBLE":
-
-                ventana.after(
-                    0,
-                    lambda n=tienda["nombre"]:
-                    mostrar_aviso(n)
+            # Avisar si cambia
+            ventana.after(
+                0,
+                lambda n=nombre,
+                a=estado_anterior,
+                e=estado:
+                avisar_cambio(
+                    n,
+                    a,
+                    e
                 )
-
+            )
 
         # =================================================
-        # ESPERA DE 2 MINUTOS
+        # SUMAR UNA COMPROBACIÓN COMPLETA
+        # =================================================
+
+        if ejecutando:
+
+            contador_comprobaciones += 1
+
+            ventana.after(
+                0,
+                lambda c=contador_comprobaciones:
+                contador_label.config(
+                    text=(
+                        f"Comprobaciones realizadas: {c}"
+                    )
+                )
+            )
+
+        # =================================================
+        # CUENTA ATRÁS DE 3 SEGUNDOS
         # =================================================
 
         for segundos in range(
@@ -287,12 +394,9 @@ def monitor():
             if not ejecutando:
                 break
 
-            minutos = segundos // 60
-            seg = segundos % 60
-
             texto = (
                 f"Próxima comprobación: "
-                f"{minutos:02d}:{seg:02d}"
+                f"{segundos} segundos"
             )
 
             ventana.after(
@@ -304,25 +408,6 @@ def monitor():
             )
 
             time.sleep(1)
-
-
-# =========================================================
-# AVISO
-# =========================================================
-
-def mostrar_aviso(tienda):
-
-    ventana.bell()
-
-    messagebox.showwarning(
-        "🚨 STOCK DETECTADO",
-        (
-            "¡POSIBLE STOCK DETECTADO!\n\n"
-            f"Tienda: {tienda}\n\n"
-            "Pokémon TCG 30th Celebration\n"
-            "Elite Trainer Box"
-        )
-    )
 
 
 # =========================================================
@@ -340,7 +425,7 @@ def iniciar():
     ejecutando = True
 
     estado_programa.config(
-        text="🟢 MONITOR ACTIVO",
+        text="MONITOR ACTIVO",
         fg="green"
     )
 
@@ -363,7 +448,7 @@ def detener():
     ejecutando = False
 
     estado_programa.config(
-        text="🔴 MONITOR DETENIDO",
+        text="MONITOR DETENIDO",
         fg="red"
     )
 
@@ -396,7 +481,7 @@ ventana.title(
 )
 
 ventana.geometry(
-    "750x650"
+    "750x700"
 )
 
 ventana.resizable(
@@ -404,6 +489,10 @@ ventana.resizable(
     False
 )
 
+
+# =========================================================
+# TÍTULO
+# =========================================================
 
 titulo = tk.Label(
     ventana,
@@ -423,20 +512,24 @@ subtitulo = tk.Label(
 )
 
 subtitulo.pack(
-    pady=(0, 25)
+    pady=(0, 10)
 )
 
 
-producto = tk.Label(
+producto_label = tk.Label(
     ventana,
     text="Elite Trainer Box",
     font=("Arial", 12, "bold")
 )
 
-producto.pack(
-    pady=(0, 20)
+producto_label.pack(
+    pady=(0, 25)
 )
 
+
+# =========================================================
+# TABLA
+# =========================================================
 
 marco = tk.Frame(
     ventana
@@ -492,7 +585,6 @@ for numero, tienda in enumerate(
         pady=12
     )
 
-
     estado = tk.Label(
         marco,
         text="SIN COMPROBAR",
@@ -507,7 +599,6 @@ for numero, tienda in enumerate(
         sticky="w"
     )
 
-
     filas.append(
         {
             "nombre": tienda["nombre"],
@@ -515,6 +606,10 @@ for numero, tienda in enumerate(
         }
     )
 
+
+# =========================================================
+# SEPARADOR
+# =========================================================
 
 separador = tk.Frame(
     ventana,
@@ -529,9 +624,13 @@ separador.pack(
 )
 
 
+# =========================================================
+# ESTADO DEL MONITOR
+# =========================================================
+
 estado_programa = tk.Label(
     ventana,
-    text="🔴 MONITOR DETENIDO",
+    text="MONITOR DETENIDO",
     font=("Arial", 14, "bold"),
     fg="red"
 )
@@ -540,6 +639,10 @@ estado_programa.pack(
     pady=5
 )
 
+
+# =========================================================
+# ÚLTIMA COMPROBACIÓN
+# =========================================================
 
 ultima_comprobacion = tk.Label(
     ventana,
@@ -552,6 +655,10 @@ ultima_comprobacion.pack(
 )
 
 
+# =========================================================
+# PRÓXIMA COMPROBACIÓN
+# =========================================================
+
 proxima_comprobacion = tk.Label(
     ventana,
     text="Próxima comprobación: detenida",
@@ -563,6 +670,25 @@ proxima_comprobacion.pack(
 )
 
 
+# =========================================================
+# CONTADOR
+# =========================================================
+
+contador_label = tk.Label(
+    ventana,
+    text="Comprobaciones realizadas: 0",
+    font=("Arial", 11, "bold")
+)
+
+contador_label.pack(
+    pady=5
+)
+
+
+# =========================================================
+# BOTONES
+# =========================================================
+
 marco_botones = tk.Frame(
     ventana
 )
@@ -572,36 +698,48 @@ marco_botones.pack(
 )
 
 
-tk.Button(
+boton_iniciar = tk.Button(
     marco_botones,
-    text="▶ INICIAR",
+    text="INICIAR",
     font=("Arial", 12, "bold"),
     width=16,
     command=iniciar
-).grid(
+)
+
+boton_iniciar.grid(
     row=0,
     column=0,
     padx=10
 )
 
 
-tk.Button(
+boton_detener = tk.Button(
     marco_botones,
-    text="■ DETENER",
+    text="DETENER",
     font=("Arial", 12, "bold"),
     width=16,
     command=detener
-).grid(
+)
+
+boton_detener.grid(
     row=0,
     column=1,
     padx=10
 )
 
 
+# =========================================================
+# CERRAR VENTANA
+# =========================================================
+
 ventana.protocol(
     "WM_DELETE_WINDOW",
     cerrar
 )
 
+
+# =========================================================
+# INICIAR VENTANA
+# =========================================================
 
 ventana.mainloop()

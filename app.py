@@ -21,8 +21,8 @@ hilo_monitor = None
 
 TIENDAS = [
     {
-        "nombre": "POKEMILLON",
-        "url": "https://www.pokemillon.com/",
+         "nombre": "POKEMILLON",
+    "url": "https://www.pokemillon.com/products/etb-30th",
     },
     {
         "nombre": "TODOHITS",

@@ -13,21 +13,29 @@ from datetime import datetime
 
 INTERVALO = 3
 
-PRODUCTO = [
-    "30th celebration elite trainer box",
-    "30th celebration etb",
-    "30th anniversary elite trainer box",
-    "30th anniversary etb",
-    "etb celebraciones 30 aniversario",
-    "elite trainer box 30th",
-]
-
 ejecutando = False
 hilo_monitor = None
 
 contador_comprobaciones = 0
 
 estados_anteriores = {}
+
+
+# =========================================================
+# PALABRAS QUE IDENTIFICAN EL 30 ANIVERSARIO
+# =========================================================
+
+PALABRAS_30 = [
+    "30th anniversary",
+    "30th anniversary pokemon",
+    "pokemon 30th",
+    "pokemon 30 aniversario",
+    "30 aniversario pokemon",
+    "30th celebration",
+    "30th celebration pokemon",
+    "celebration 30th",
+    "30 aniversario",
+]
 
 
 # =========================================================
@@ -69,68 +77,19 @@ HEADERS = {
         "(KHTML, like Gecko) "
         "Chrome/151.0 Safari/537.36"
     ),
-    "Accept": (
-        "text/html,application/xhtml+xml,"
-        "application/xml;q=0.9,image/avif,"
-        "image/webp,*/*;q=0.8"
-    ),
     "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
 }
 
 
 # =========================================================
-# COMPROBAR SI EL PRODUCTO APARECE
+# COMPROBAR SI UNA PÁGINA ES DEL 30 ANIVERSARIO
 # =========================================================
 
-def producto_aparece(texto):
+def es_30_aniversario(texto):
 
     texto = texto.lower()
 
-    for palabra in PRODUCTO:
-
-        if palabra in texto:
-            return True
-
-    if (
-        "30th anniversary" in texto
-        and "elite trainer box" in texto
-    ):
-        return True
-
-    if (
-        "30th celebration" in texto
-        and "elite trainer box" in texto
-    ):
-        return True
-
-    if (
-        "30 aniversario" in texto
-        and "elite trainer box" in texto
-    ):
-        return True
-
-    return False
-
-
-# =========================================================
-# COMPROBAR AGOTADO
-# =========================================================
-
-def esta_agotado(texto):
-
-    texto = texto.lower()
-
-    palabras = [
-        "agotado",
-        "agotada",
-        "sold out",
-        "out of stock",
-        "sin stock",
-        "sin existencias",
-        "no disponible",
-    ]
-
-    for palabra in palabras:
+    for palabra in PALABRAS_30:
 
         if palabra in texto:
             return True
@@ -139,31 +98,64 @@ def esta_agotado(texto):
 
 
 # =========================================================
-# COMPROBAR DISPONIBLE
+# EXTRAER PRODUCTOS RELACIONADOS
 # =========================================================
 
-def esta_disponible(texto):
+def buscar_productos_30(soup):
 
-    texto = texto.lower()
+    productos = []
 
-    palabras = [
-        "en stock",
-        "in stock",
-        "disponible",
-        "hay existencias",
-        "en existencia",
-    ]
+    # -----------------------------------------------------
+    # Buscar títulos habituales de productos
+    # -----------------------------------------------------
 
-    for palabra in palabras:
+    etiquetas = soup.find_all(
+        [
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "a",
+        ]
+    )
 
-        if palabra in texto:
-            return True
+    for etiqueta in etiquetas:
 
-    return False
+        texto = etiqueta.get_text(
+            " ",
+            strip=True
+        )
+
+        if not texto:
+            continue
+
+        texto_lower = texto.lower()
+
+        # Comprobamos que tenga referencia al 30 aniversario
+
+        relacionado = False
+
+        for palabra in PALABRAS_30:
+
+            if palabra in texto_lower:
+
+                relacionado = True
+                break
+
+        if relacionado:
+
+            # Evitar duplicados
+
+            if texto not in productos:
+
+                productos.append(texto)
+
+    return productos[:10]
 
 
 # =========================================================
-# COMPROBAR UNA TIENDA
+# COMPROBAR TIENDA
 # =========================================================
 
 def comprobar_tienda(tienda):
@@ -173,56 +165,84 @@ def comprobar_tienda(tienda):
         respuesta = requests.get(
             tienda["url"],
             headers=HEADERS,
-            timeout=20
+            timeout=15,
+            allow_redirects=True
         )
 
-        if respuesta.status_code != 200:
-            return "ERROR"
+        # -------------------------------------------------
+        # Cualquier respuesta HTTP correcta
+        # -------------------------------------------------
+
+        if respuesta.status_code < 200 or respuesta.status_code >= 400:
+
+            return "ERROR", []
+
+
+        # -------------------------------------------------
+        # Analizar HTML
+        # -------------------------------------------------
 
         soup = BeautifulSoup(
             respuesta.text,
             "html.parser"
         )
 
+
         texto = soup.get_text(
             " ",
             strip=True
-        ).lower()
+        )
 
-        # Producto no encontrado
-        if not producto_aparece(texto):
-            return "NO ENCONTRADO"
 
-        # Producto publicado pero agotado
-        if esta_agotado(texto):
-            return "AGOTADO"
+        # -------------------------------------------------
+        # ¿HAY REFERENCIAS AL 30 ANIVERSARIO?
+        # -------------------------------------------------
 
-        # Producto publicado y disponible
-        if esta_disponible(texto):
-            return "EN STOCK"
+        if not es_30_aniversario(texto):
 
-        # Producto publicado pero no podemos
-        # determinar claramente el stock
-        return "PUBLICADO"
+            return "NO ENCONTRADO", []
+
+
+        # -------------------------------------------------
+        # BUSCAR NOMBRES DE PRODUCTOS
+        # -------------------------------------------------
+
+        productos = buscar_productos_30(
+            soup
+        )
+
+
+        # -------------------------------------------------
+        # ENCONTRADO
+        # -------------------------------------------------
+
+        return "ENCONTRADO", productos
+
 
     except requests.exceptions.Timeout:
 
-        return "ERROR"
+        return "ERROR", []
+
 
     except requests.exceptions.ConnectionError:
 
-        return "ERROR"
+        return "ERROR", []
+
 
     except Exception:
 
-        return "ERROR"
+        return "ERROR", []
 
 
 # =========================================================
-# ACTUALIZAR ESTADO EN PANTALLA
+# ACTUALIZAR TIENDA
 # =========================================================
 
-def actualizar_estado(nombre, estado):
+def actualizar_estado(
+    nombre,
+    estado,
+    productos
+):
 
     for fila in filas:
 
@@ -232,29 +252,20 @@ def actualizar_estado(nombre, estado):
                 text=estado
             )
 
-            if estado == "EN STOCK":
+
+            if estado == "ENCONTRADO":
 
                 fila["estado"].config(
                     fg="green"
                 )
 
-            elif estado == "AGOTADO":
-
-                fila["estado"].config(
-                    fg="red"
-                )
-
-            elif estado == "PUBLICADO":
-
-                fila["estado"].config(
-                    fg="blue"
-                )
 
             elif estado == "NO ENCONTRADO":
 
                 fila["estado"].config(
                     fg="gray"
                 )
+
 
             elif estado == "ERROR":
 
@@ -263,40 +274,68 @@ def actualizar_estado(nombre, estado):
                 )
 
 
+            # ------------------------------------------------
+            # Mostrar productos
+            # ------------------------------------------------
+
+            descripcion = ""
+
+            if productos:
+
+                descripcion = (
+                    " | ".join(productos[:3])
+                )
+
+            else:
+
+                if estado == "ENCONTRADO":
+
+                    descripcion = (
+                        "Producto 30th Anniversary encontrado"
+                    )
+
+
+            fila["producto"].config(
+                text=descripcion
+            )
+
+
 # =========================================================
-# AVISO DE CAMBIO
+# AVISAR CAMBIO
 # =========================================================
 
 def avisar_cambio(
     nombre,
-    estado_anterior,
-    estado_nuevo
+    anterior,
+    nuevo
 ):
 
-    if estado_anterior is None:
+    if anterior is None:
+
         return
 
-    if estado_anterior == estado_nuevo:
+
+    if anterior == nuevo:
+
         return
 
-    mensaje = (
-        f"{nombre}\n\n"
-        f"Estado anterior:\n"
-        f"{estado_anterior}\n\n"
-        f"Nuevo estado:\n"
-        f"{estado_nuevo}"
-    )
 
-    ventana.bell()
+    if nuevo == "ENCONTRADO":
 
-    messagebox.showwarning(
-        "CAMBIO DETECTADO",
-        mensaje
-    )
+        ventana.bell()
+
+        messagebox.showinfo(
+            "PRODUCTO 30th ANIVERSARIO",
+            (
+                f"Se ha encontrado contenido "
+                f"del 30 aniversario.\n\n"
+                f"Tienda: {nombre}"
+            )
+        )
 
 
 # =========================================================
-# MONITOR PRINCIPAL
+# MONITOR
 # =========================================================
 
 def monitor():
@@ -304,19 +343,24 @@ def monitor():
     global ejecutando
     global contador_comprobaciones
 
+
     while ejecutando:
 
         hora = datetime.now().strftime(
             "%H:%M:%S"
         )
 
+
         ventana.after(
             0,
             lambda h=hora:
             ultima_comprobacion.config(
-                text=f"Última comprobación: {h}"
+                text=(
+                    f"Última comprobación: {h}"
+                )
             )
         )
+
 
         # =================================================
         # COMPROBAR LAS 5 TIENDAS
@@ -325,36 +369,55 @@ def monitor():
         for tienda in TIENDAS:
 
             if not ejecutando:
+
                 break
+
 
             nombre = tienda["nombre"]
 
-            estado = comprobar_tienda(
+
+            estado, productos = comprobar_tienda(
                 tienda
             )
 
-            estado_anterior = (
-                estados_anteriores.get(nombre)
-            )
 
-            estados_anteriores[nombre] = estado
-
-            # Actualizar pantalla
-            ventana.after(
-                0,
-                lambda n=nombre,
-                e=estado:
-                actualizar_estado(
-                    n,
-                    e
+            anterior = (
+                estados_anteriores.get(
+                    nombre
                 )
             )
 
-            # Avisar si cambia
+
+            estados_anteriores[
+                nombre
+            ] = estado
+
+
+            # ------------------------------------------------
+            # ACTUALIZAR INTERFAZ
+            # ------------------------------------------------
+
             ventana.after(
                 0,
                 lambda n=nombre,
-                a=estado_anterior,
+                e=estado,
+                p=productos:
+                actualizar_estado(
+                    n,
+                    e,
+                    p
+                )
+            )
+
+
+            # ------------------------------------------------
+            # AVISAR SI APARECE
+            # ------------------------------------------------
+
+            ventana.after(
+                0,
+                lambda n=nombre,
+                a=anterior,
                 e=estado:
                 avisar_cambio(
                     n,
@@ -363,13 +426,15 @@ def monitor():
                 )
             )
 
+
         # =================================================
-        # SUMAR UNA COMPROBACIÓN COMPLETA
+        # CONTADOR
         # =================================================
 
         if ejecutando:
 
             contador_comprobaciones += 1
+
 
             ventana.after(
                 0,
@@ -381,8 +446,9 @@ def monitor():
                 )
             )
 
+
         # =================================================
-        # CUENTA ATRÁS DE 3 SEGUNDOS
+        # ESPERAR 3 SEGUNDOS
         # =================================================
 
         for segundos in range(
@@ -392,20 +458,21 @@ def monitor():
         ):
 
             if not ejecutando:
+
                 break
 
-            texto = (
-                f"Próxima comprobación: "
-                f"{segundos} segundos"
-            )
 
             ventana.after(
                 0,
-                lambda t=texto:
+                lambda s=segundos:
                 proxima_comprobacion.config(
-                    text=t
+                    text=(
+                        f"Próxima comprobación: "
+                        f"{s} segundos"
+                    )
                 )
             )
+
 
             time.sleep(1)
 
@@ -419,20 +486,26 @@ def iniciar():
     global ejecutando
     global hilo_monitor
 
+
     if ejecutando:
+
         return
 
+
     ejecutando = True
+
 
     estado_programa.config(
         text="MONITOR ACTIVO",
         fg="green"
     )
 
+
     hilo_monitor = threading.Thread(
         target=monitor,
         daemon=True
     )
+
 
     hilo_monitor.start()
 
@@ -445,12 +518,15 @@ def detener():
 
     global ejecutando
 
+
     ejecutando = False
+
 
     estado_programa.config(
         text="MONITOR DETENIDO",
         fg="red"
     )
+
 
     proxima_comprobacion.config(
         text="Próxima comprobación: detenida"
@@ -465,24 +541,29 @@ def cerrar():
 
     global ejecutando
 
+
     ejecutando = False
+
 
     ventana.destroy()
 
 
 # =========================================================
-# INTERFAZ
+# VENTANA
 # =========================================================
 
 ventana = tk.Tk()
+
 
 ventana.title(
     "POKEMONSTOCK"
 )
 
+
 ventana.geometry(
-    "750x700"
+    "900x750"
 )
+
 
 ventana.resizable(
     False,
@@ -512,13 +593,16 @@ subtitulo = tk.Label(
 )
 
 subtitulo.pack(
-    pady=(0, 10)
+    pady=(0, 5)
 )
 
 
 producto_label = tk.Label(
     ventana,
-    text="Elite Trainer Box",
+    text=(
+        "Buscando CUALQUIER PRODUCTO "
+        "del 30 aniversario"
+    ),
     font=("Arial", 12, "bold")
 )
 
@@ -528,7 +612,7 @@ producto_label.pack(
 
 
 # =========================================================
-# TABLA
+# CABECERA TABLA
 # =========================================================
 
 marco = tk.Frame(
@@ -537,7 +621,7 @@ marco = tk.Frame(
 
 marco.pack(
     fill="x",
-    padx=50
+    padx=35
 )
 
 
@@ -559,10 +643,26 @@ tk.Label(
 ).grid(
     row=0,
     column=1,
-    padx=150,
+    padx=40,
     sticky="w"
 )
 
+
+tk.Label(
+    marco,
+    text="PRODUCTO / DESCRIPCIÓN",
+    font=("Arial", 11, "bold")
+).grid(
+    row=0,
+    column=2,
+    padx=20,
+    sticky="w"
+)
+
+
+# =========================================================
+# FILAS
+# =========================================================
 
 filas = []
 
@@ -572,18 +672,21 @@ for numero, tienda in enumerate(
     start=1
 ):
 
+
     nombre = tk.Label(
         marco,
         text=tienda["nombre"],
         font=("Arial", 11)
     )
 
+
     nombre.grid(
         row=numero,
         column=0,
         sticky="w",
-        pady=12
+        pady=15
     )
+
 
     estado = tk.Label(
         marco,
@@ -592,17 +695,37 @@ for numero, tienda in enumerate(
         fg="gray"
     )
 
+
     estado.grid(
         row=numero,
         column=1,
-        padx=150,
+        padx=40,
         sticky="w"
     )
+
+
+    producto = tk.Label(
+        marco,
+        text="",
+        font=("Arial", 9),
+        wraplength=400,
+        justify="left"
+    )
+
+
+    producto.grid(
+        row=numero,
+        column=2,
+        padx=20,
+        sticky="w"
+    )
+
 
     filas.append(
         {
             "nombre": tienda["nombre"],
-            "estado": estado
+            "estado": estado,
+            "producto": producto
         }
     )
 
@@ -617,15 +740,16 @@ separador = tk.Frame(
     bg="gray"
 )
 
+
 separador.pack(
     fill="x",
-    padx=50,
+    padx=35,
     pady=20
 )
 
 
 # =========================================================
-# ESTADO DEL MONITOR
+# ESTADO
 # =========================================================
 
 estado_programa = tk.Label(
@@ -635,13 +759,14 @@ estado_programa = tk.Label(
     fg="red"
 )
 
+
 estado_programa.pack(
     pady=5
 )
 
 
 # =========================================================
-# ÚLTIMA COMPROBACIÓN
+# HORA
 # =========================================================
 
 ultima_comprobacion = tk.Label(
@@ -650,13 +775,14 @@ ultima_comprobacion = tk.Label(
     font=("Arial", 10)
 )
 
+
 ultima_comprobacion.pack(
     pady=3
 )
 
 
 # =========================================================
-# PRÓXIMA COMPROBACIÓN
+# PRÓXIMA
 # =========================================================
 
 proxima_comprobacion = tk.Label(
@@ -664,6 +790,7 @@ proxima_comprobacion = tk.Label(
     text="Próxima comprobación: detenida",
     font=("Arial", 10)
 )
+
 
 proxima_comprobacion.pack(
     pady=3
@@ -680,6 +807,7 @@ contador_label = tk.Label(
     font=("Arial", 11, "bold")
 )
 
+
 contador_label.pack(
     pady=5
 )
@@ -693,6 +821,7 @@ marco_botones = tk.Frame(
     ventana
 )
 
+
 marco_botones.pack(
     pady=25
 )
@@ -705,6 +834,7 @@ boton_iniciar = tk.Button(
     width=16,
     command=iniciar
 )
+
 
 boton_iniciar.grid(
     row=0,
@@ -721,6 +851,7 @@ boton_detener = tk.Button(
     command=detener
 )
 
+
 boton_detener.grid(
     row=0,
     column=1,
@@ -729,7 +860,7 @@ boton_detener.grid(
 
 
 # =========================================================
-# CERRAR VENTANA
+# CERRAR
 # =========================================================
 
 ventana.protocol(
@@ -739,7 +870,7 @@ ventana.protocol(
 
 
 # =========================================================
-# INICIAR VENTANA
+# EJECUTAR
 # =========================================================
 
 ventana.mainloop()

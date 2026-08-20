@@ -7,7 +7,7 @@ from bs4 import BeautifulSoup
 from datetime import datetime
 from urllib.parse import urljoin
 
-INTERVALO = 120
+INTERVALO = 3
 
 PRODUCTO = "30th Celebration Elite Trainer Box"
 

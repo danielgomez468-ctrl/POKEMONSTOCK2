@@ -1,99 +1,61 @@
 import tkinter as tk
 from tkinter import messagebox
-import threading
-import time
 import requests
 from bs4 import BeautifulSoup
+import threading
+import time
 from datetime import datetime
-from urllib.parse import urljoin
 
 
 # ============================================================
 # CONFIGURACIÓN
 # ============================================================
 
-INTERVALO = 60  # 1 minuto
+INTERVALO = 60
 
 ejecutando = False
-hilo_monitor = None
-contador_comprobaciones = 0
+hilo = None
+contador = 0
 
-# Productos encontrados en la comprobación anterior
-productos_anteriores = {}
+productos_conocidos = {
+    "POKEMILLON": set(),
+    "TODOHITS": set()
+}
 
 
 # ============================================================
-# PALABRAS QUE IDENTIFICAN LA COLECCIÓN
+# PÁGINAS QUE VAMOS A VIGILAR
 # ============================================================
 
-PALABRAS_COLECCION = [
+TIENDAS = {
+
+    "POKEMILLON": [
+        "https://www.pokemillon.com/collections/eternos-30-aniversario-eternals-30th-anniversary"
+    ],
+
+    "TODOHITS": [
+        "https://todohits.com/collections/all"
+    ]
+
+}
+
+
+# ============================================================
+# PALABRAS QUE IDENTIFICAN EL 30 ANIVERSARIO
+# ============================================================
+
+PALABRAS = [
     "30th anniversary",
     "30th anniversary pokemon",
     "pokemon 30th anniversary",
-    "pokemon 30th",
-    "30th pokemon",
-
+    "30th celebration",
+    "30th celebrations",
     "30 aniversario",
     "30 aniversario pokemon",
     "pokemon 30 aniversario",
-
-    "30th celebration",
-    "30th celebrations",
-    "pokemon 30th celebration",
-    "pokemon 30th celebrations",
-
     "celebraciones 30 aniversario",
     "celebraciones 30th",
-    "30 aniversario pokemon tcg",
-]
-
-
-# ============================================================
-# TIENDAS
-# ============================================================
-
-TIENDAS = [
-    {
-        "nombre": "POKEMILLON",
-
-        "urls": [
-            "https://www.pokemillon.com/collections/eternos-30-aniversario-eternals-30th-anniversary",
-            "https://www.pokemillon.com/collections/all/pokemon",
-        ],
-    },
-
-    {
-        "nombre": "TODOHITS",
-
-        "urls": [
-            "https://todohits.com/collections/all",
-            "https://todohits.com/collections/novedades",
-        ],
-    },
-
-    {
-        "nombre": "POKEBANK",
-
-        "urls": [
-            "https://pokebank.es/",
-        ],
-    },
-
-    {
-        "nombre": "SUNNY STORE",
-
-        "urls": [
-            "https://sunnystore.es/",
-        ],
-    },
-
-    {
-        "nombre": "UN SOBRE MÁS",
-
-        "urls": [
-            "https://unsobremas.com/",
-        ],
-    },
+    "30th"
 ]
 
 
@@ -102,50 +64,34 @@ TIENDAS = [
 # ============================================================
 
 HEADERS = {
-    "User-Agent": (
+    "User-Agent":
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 "
         "(KHTML, like Gecko) "
-        "Chrome/151.0.0.0 Safari/537.36"
-    ),
+        "Chrome/151.0.0.0 Safari/537.36",
 
-    "Accept": (
+    "Accept":
         "text/html,application/xhtml+xml,"
         "application/xml;q=0.9,image/avif,"
-        "image/webp,*/*;q=0.8"
-    ),
+        "image/webp,*/*;q=0.8",
 
-    "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
-
-    "Cache-Control": "no-cache",
-
-    "Pragma": "no-cache",
+    "Accept-Language":
+        "es-ES,es;q=0.9,en;q=0.8"
 }
 
 
 # ============================================================
-# NORMALIZAR TEXTO
+# COMPROBAR SI EL TEXTO ES DEL 30 ANIVERSARIO
 # ============================================================
 
-def normalizar(texto):
+def es_30_aniversario(texto):
 
     if not texto:
-        return ""
+        return False
 
-    return " ".join(
-        texto.lower().split()
-    )
+    texto = texto.lower()
 
-
-# ============================================================
-# COMPROBAR SI UN TEXTO ES DE LA COLECCIÓN
-# ============================================================
-
-def pertenece_coleccion(texto):
-
-    texto = normalizar(texto)
-
-    for palabra in PALABRAS_COLECCION:
+    for palabra in PALABRAS:
 
         if palabra in texto:
             return True
@@ -154,212 +100,41 @@ def pertenece_coleccion(texto):
 
 
 # ============================================================
-# EXTRAER NOMBRE DE PRODUCTO
+# LIMPIAR TEXTO
 # ============================================================
 
-def obtener_nombre_producto(elemento):
+def limpiar(texto):
 
-    # Primero intentamos el texto visible
-    texto = elemento.get_text(
-        " ",
-        strip=True
-    )
+    if not texto:
+        return ""
 
-    texto = " ".join(
+    return " ".join(
         texto.split()
-    )
-
-    if texto:
-        return texto
-
-
-    # Si no hay texto, probamos atributos
-    atributos = [
-        "title",
-        "aria-label",
-        "data-title",
-        "data-product-title",
-    ]
-
-    for atributo in atributos:
-
-        valor = elemento.get(
-            atributo
-        )
-
-        if valor:
-
-            return " ".join(
-                str(valor).split()
-            )
-
-    return ""
+    ).strip()
 
 
 # ============================================================
-# EXTRAER PRODUCTOS DE UNA PÁGINA
+# DESCARGAR PÁGINA
 # ============================================================
 
-def extraer_productos(soup, url):
-
-    productos = {}
-
-    # --------------------------------------------------------
-    # 1. ENLACES
-    # --------------------------------------------------------
-
-    enlaces = soup.find_all(
-        "a",
-        href=True
-    )
-
-    for enlace in enlaces:
-
-        nombre = obtener_nombre_producto(
-            enlace
-        )
-
-        href = enlace.get(
-            "href"
-        )
-
-        if not href:
-            continue
-
-        url_producto = urljoin(
-            url,
-            href
-        )
-
-        texto_completo = (
-            nombre
-            + " "
-            + href
-        )
-
-        if pertenece_coleccion(
-            texto_completo
-        ):
-
-            if len(nombre) > 2:
-
-                productos[
-                    url_producto
-                ] = nombre
-
-
-    # --------------------------------------------------------
-    # 2. TÍTULOS
-    # --------------------------------------------------------
-
-    for etiqueta in soup.find_all(
-        [
-            "h1",
-            "h2",
-            "h3",
-            "h4",
-            "h5",
-            "h6",
-        ]
-    ):
-
-        nombre = obtener_nombre_producto(
-            etiqueta
-        )
-
-        if pertenece_coleccion(
-            nombre
-        ):
-
-            if len(nombre) > 2:
-
-                productos[
-                    "titulo:" + nombre
-                ] = nombre
-
-
-    # --------------------------------------------------------
-    # 3. ATRIBUTOS DE PRODUCTO
-    # --------------------------------------------------------
-
-    for etiqueta in soup.find_all(
-        True
-    ):
-
-        for atributo in [
-            "title",
-            "aria-label",
-            "data-title",
-            "data-product-title",
-        ]:
-
-            valor = etiqueta.get(
-                atributo
-            )
-
-            if not valor:
-                continue
-
-            valor = " ".join(
-                str(valor).split()
-            )
-
-            if pertenece_coleccion(
-                valor
-            ):
-
-                if len(valor) > 2:
-
-                    productos[
-                        "atributo:" + valor
-                    ] = valor
-
-
-    # --------------------------------------------------------
-    # ELIMINAR RESULTADOS ENORMES
-    # --------------------------------------------------------
-
-    resultado = []
-
-    for nombre in productos.values():
-
-        if len(nombre) > 200:
-            continue
-
-        if nombre not in resultado:
-
-            resultado.append(
-                nombre
-            )
-
-
-    return resultado
-
-
-# ============================================================
-# COMPROBAR UNA URL
-# ============================================================
-
-def descargar_pagina(url):
+def descargar(url):
 
     try:
 
         respuesta = requests.get(
             url,
             headers=HEADERS,
-            timeout=20,
-            allow_redirects=True
+            timeout=20
         )
 
-        if 200 <= respuesta.status_code < 400:
+        if respuesta.status_code != 200:
 
-            return respuesta.text, None
+            return None, (
+                "HTTP "
+                + str(respuesta.status_code)
+            )
 
-        return (
-            None,
-            "HTTP "
-            + str(respuesta.status_code)
-        )
+        return respuesta.text, None
 
     except requests.exceptions.Timeout:
 
@@ -369,110 +144,262 @@ def descargar_pagina(url):
 
         return None, "CONEXIÓN"
 
-    except Exception as error:
+    except Exception as e:
 
-        return None, str(error)
+        return None, str(e)
+
+
+# ============================================================
+# EXTRAER PRODUCTOS
+# ============================================================
+
+def buscar_productos(html):
+
+    soup = BeautifulSoup(
+        html,
+        "html.parser"
+    )
+
+    productos = set()
+
+
+    # --------------------------------------------------------
+    # SHOPIFY: PRODUCT GRID
+    # --------------------------------------------------------
+
+    selectores = [
+
+        ".product-card",
+
+        ".card-wrapper",
+
+        ".product-grid-item",
+
+        ".grid-product",
+
+        ".product-item",
+
+        ".product-card-wrapper",
+
+        "[class*='product-card']",
+
+        "[class*='product-item']",
+
+        "[class*='product-grid']"
+
+    ]
+
+
+    elementos = []
+
+    for selector in selectores:
+
+        encontrados = soup.select(
+            selector
+        )
+
+        elementos.extend(
+            encontrados
+        )
+
+
+    # --------------------------------------------------------
+    # ANALIZAR CADA PRODUCTO
+    # --------------------------------------------------------
+
+    for elemento in elementos:
+
+        texto = limpiar(
+            elemento.get_text(
+                " ",
+                strip=True
+            )
+        )
+
+
+        if not texto:
+            continue
+
+
+        if es_30_aniversario(
+            texto
+        ):
+
+            # Intentar obtener título
+            titulo = None
+
+
+            for selector in [
+                "h1",
+                "h2",
+                "h3",
+                "h4",
+                ".card__heading",
+                ".product-title",
+                ".product-card__title",
+                "[class*='title']"
+            ]:
+
+                encontrado = elemento.select_one(
+                    selector
+                )
+
+                if encontrado:
+
+                    titulo = limpiar(
+                        encontrado.get_text(
+                            " ",
+                            strip=True
+                        )
+                    )
+
+                    if titulo:
+                        break
+
+
+            if titulo:
+
+                productos.add(
+                    titulo
+                )
+
+            else:
+
+                # Si no encontramos título,
+                # usamos una versión corta
+                if len(texto) <= 200:
+
+                    productos.add(
+                        texto
+                    )
+
+
+    # --------------------------------------------------------
+    # SEGUNDA BÚSQUEDA:
+    # ENLACES DE PRODUCTOS
+    # --------------------------------------------------------
+
+    for enlace in soup.find_all(
+        "a",
+        href=True
+    ):
+
+        texto = limpiar(
+            enlace.get_text(
+                " ",
+                strip=True
+            )
+        )
+
+        href = enlace.get(
+            "href",
+            ""
+        )
+
+
+        # Solo consideramos enlaces
+        # que parezcan productos
+
+        parece_producto = (
+            "/products/" in href
+            or "/product/" in href
+        )
+
+
+        if not parece_producto:
+            continue
+
+
+        if es_30_aniversario(
+            texto
+        ):
+
+            if texto:
+
+                if len(texto) <= 200:
+
+                    productos.add(
+                        texto
+                    )
+
+
+    return productos
 
 
 # ============================================================
 # COMPROBAR TIENDA
 # ============================================================
 
-def comprobar_tienda(tienda):
+def comprobar_tienda(
+    nombre,
+    urls
+):
 
-    todos_los_productos = []
+    productos = set()
+
     errores = []
 
-    paginas_ok = 0
 
-    for url in tienda["urls"]:
+    for url in urls:
 
-        html, error = descargar_pagina(
+        html, error = descargar(
             url
         )
+
 
         if html is None:
 
             errores.append(
-                url
-                + " -> "
-                + str(error)
+                error
             )
 
             continue
 
-        paginas_ok += 1
 
-        soup = BeautifulSoup(
-            html,
-            "html.parser"
+        encontrados = buscar_productos(
+            html
         )
 
-        productos = extraer_productos(
-            soup,
-            url
+
+        productos.update(
+            encontrados
         )
-
-        for producto in productos:
-
-            if producto not in todos_los_productos:
-
-                todos_los_productos.append(
-                    producto
-                )
 
 
     # --------------------------------------------------------
-    # HAY PRODUCTOS PUBLICADOS
+    # RESULTADO
     # --------------------------------------------------------
 
-    if todos_los_productos:
+    if productos:
 
         return (
             "PUBLICADO",
-            todos_los_productos,
+            productos,
             ""
         )
 
-
-    # --------------------------------------------------------
-    # PÁGINA ACCESIBLE PERO SIN PRODUCTO
-    # --------------------------------------------------------
-
-    if paginas_ok > 0:
-
-        return (
-            "NO ENCONTRADO",
-            [],
-            ""
-        )
-
-
-    # --------------------------------------------------------
-    # NO PODEMOS ACCEDER
-    # --------------------------------------------------------
 
     if errores:
 
         return (
             "ERROR",
-            [],
+            set(),
             errores[0]
         )
 
 
     return (
         "NO ENCONTRADO",
-        [],
+        set(),
         ""
     )
 
 
 # ============================================================
-# ACTUALIZAR PANTALLA
+# ACTUALIZAR FILA
 # ============================================================
 
-def actualizar_tienda(
+def actualizar_fila(
     nombre,
     estado,
     productos,
@@ -485,7 +412,6 @@ def actualizar_tienda(
             continue
 
 
-        # Estado
         fila["estado"].config(
             text=estado
         )
@@ -503,19 +429,23 @@ def actualizar_tienda(
                 fg="gray"
             )
 
-        elif estado == "ERROR":
+        else:
 
             fila["estado"].config(
                 fg="orange"
             )
 
 
-        # Productos
         if productos:
+
+            lista = sorted(
+                productos
+            )
+
 
             texto = ""
 
-            for producto in productos[:12]:
+            for producto in lista[:15]:
 
                 texto += (
                     "• "
@@ -523,60 +453,45 @@ def actualizar_tienda(
                     + "\n"
                 )
 
-            fila["producto"].config(
+
+            if len(lista) > 15:
+
+                texto += (
+                    "\n... y "
+                    + str(
+                        len(lista) - 15
+                    )
+                    + " productos más"
+                )
+
+
+            fila["productos"].config(
                 text=texto
             )
 
+
         elif error:
 
-            fila["producto"].config(
-                text="Error: " + error
+            fila["productos"].config(
+                text=(
+                    "Error de consulta: "
+                    + error
+                )
             )
 
         else:
 
-            fila["producto"].config(
-                text=""
+            fila["productos"].config(
+                text="Sin productos detectados"
             )
 
 
 # ============================================================
-# DETECTAR PRODUCTOS NUEVOS
+# MOSTRAR NUEVOS PRODUCTOS
 # ============================================================
 
-def detectar_nuevos(
-    nombre,
-    productos
-):
-
-    anteriores = productos_anteriores.get(
-        nombre,
-        []
-    )
-
-    nuevos = []
-
-    for producto in productos:
-
-        if producto not in anteriores:
-
-            nuevos.append(
-                producto
-            )
-
-    productos_anteriores[
-        nombre
-    ] = productos
-
-    return nuevos
-
-
-# ============================================================
-# AVISO DE NUEVO PRODUCTO
-# ============================================================
-
-def avisar_nuevos(
-    nombre,
+def mostrar_nuevos(
+    tienda,
     nuevos
 ):
 
@@ -585,14 +500,15 @@ def avisar_nuevos(
 
 
     mensaje = (
-        "Tienda:\n"
-        + nombre
+        "🚨 NUEVO PRODUCTO PUBLICADO\n\n"
+        + tienda
         + "\n\n"
-        "NUEVO PRODUCTO PUBLICADO:\n\n"
     )
 
 
-    for producto in nuevos[:10]:
+    for producto in sorted(
+        nuevos
+    ):
 
         mensaje += (
             "• "
@@ -605,19 +521,19 @@ def avisar_nuevos(
 
 
     messagebox.showinfo(
-        "NUEVO PRODUCTO 30th ANNIVERSARY",
+        "POKEMONSTOCK - NUEVO PRODUCTO",
         mensaje
     )
 
 
 # ============================================================
-# MONITOR
+# CICLO DE MONITORIZACIÓN
 # ============================================================
 
 def monitor():
 
+    global contador
     global ejecutando
-    global contador_comprobaciones
 
 
     while ejecutando:
@@ -630,7 +546,7 @@ def monitor():
         ventana.after(
             0,
             lambda h=hora:
-            ultima_comprobacion.config(
+            ultima.config(
                 text=(
                     "Última comprobación: "
                     + h
@@ -639,43 +555,63 @@ def monitor():
         )
 
 
-        # ----------------------------------------------------
-        # COMPROBAR TIENDAS
-        # ----------------------------------------------------
+        # ====================================================
+        # COMPROBAR LAS DOS TIENDAS
+        # ====================================================
 
-        for tienda in TIENDAS:
+        for nombre, urls in TIENDAS.items():
 
             if not ejecutando:
                 break
 
 
-            nombre = tienda[
-                "nombre"
-            ]
-
-
             estado, productos, error = (
                 comprobar_tienda(
-                    tienda
+                    nombre,
+                    urls
                 )
             )
 
 
-            # Detectar nuevos
-            nuevos = detectar_nuevos(
-                nombre,
-                productos
-            )
+            # ------------------------------------------------
+            # DETECTAR NUEVOS
+            # ------------------------------------------------
+
+            anteriores = productos_conocidos[
+                nombre
+            ]
 
 
-            # Actualizar interfaz
+            # La primera comprobación solamente
+            # establece la referencia inicial.
+            if contador == 0:
+
+                nuevos = set()
+
+            else:
+
+                nuevos = (
+                    productos
+                    - anteriores
+                )
+
+
+            productos_conocidos[
+                nombre
+            ] = set(productos)
+
+
+            # ------------------------------------------------
+            # ACTUALIZAR INTERFAZ
+            # ------------------------------------------------
+
             ventana.after(
                 0,
                 lambda n=nombre,
                 e=estado,
                 p=productos,
                 er=error:
-                actualizar_tienda(
+                actualizar_fila(
                     n,
                     e,
                     p,
@@ -684,43 +620,45 @@ def monitor():
             )
 
 
-            # Avisar nuevos productos
+            # ------------------------------------------------
+            # AVISAR NUEVOS
+            # ------------------------------------------------
+
             if nuevos:
 
                 ventana.after(
                     0,
                     lambda n=nombre,
                     x=nuevos:
-                    avisar_nuevos(
+                    mostrar_nuevos(
                         n,
                         x
                     )
                 )
 
 
-        # ----------------------------------------------------
+        # ====================================================
         # CONTADOR
-        # ----------------------------------------------------
+        # ====================================================
 
-        if ejecutando:
+        contador += 1
 
-            contador_comprobaciones += 1
 
-            ventana.after(
-                0,
-                lambda c=contador_comprobaciones:
-                contador_label.config(
-                    text=(
-                        "Comprobaciones realizadas: "
-                        + str(c)
-                    )
+        ventana.after(
+            0,
+            lambda c=contador:
+            contador_label.config(
+                text=(
+                    "Comprobaciones realizadas: "
+                    + str(c)
                 )
             )
+        )
 
 
-        # ----------------------------------------------------
+        # ====================================================
         # CUENTA ATRÁS
-        # ----------------------------------------------------
+        # ====================================================
 
         for segundos in range(
             INTERVALO,
@@ -735,7 +673,7 @@ def monitor():
             ventana.after(
                 0,
                 lambda s=segundos:
-                proxima_comprobacion.config(
+                proxima.config(
                     text=(
                         "Próxima comprobación: "
                         + str(s)
@@ -755,7 +693,7 @@ def monitor():
 def iniciar():
 
     global ejecutando
-    global hilo_monitor
+    global hilo
 
 
     if ejecutando:
@@ -766,18 +704,18 @@ def iniciar():
 
 
     estado_programa.config(
-        text="MONITOR ACTIVO",
+        text="🟢 MONITOR ACTIVO",
         fg="green"
     )
 
 
-    hilo_monitor = threading.Thread(
+    hilo = threading.Thread(
         target=monitor,
         daemon=True
     )
 
 
-    hilo_monitor.start()
+    hilo.start()
 
 
 # ============================================================
@@ -792,12 +730,12 @@ def detener():
 
 
     estado_programa.config(
-        text="MONITOR DETENIDO",
+        text="🔴 MONITOR DETENIDO",
         fg="red"
     )
 
 
-    proxima_comprobacion.config(
+    proxima.config(
         text="Próxima comprobación: detenida"
     )
 
@@ -822,11 +760,11 @@ def cerrar():
 ventana = tk.Tk()
 
 ventana.title(
-    "POKEMONSTOCK - 30th Anniversary"
+    "POKEMONSTOCK - Pokémon 30th Anniversary"
 )
 
 ventana.geometry(
-    "1100x800"
+    "1100x700"
 )
 
 ventana.resizable(
@@ -839,7 +777,7 @@ ventana.resizable(
 # TÍTULO
 # ============================================================
 
-titulo = tk.Label(
+tk.Label(
     ventana,
     text="POKEMONSTOCK",
     font=(
@@ -847,47 +785,43 @@ titulo = tk.Label(
         30,
         "bold"
     )
-)
-
-titulo.pack(
+).pack(
     pady=(25, 5)
 )
 
 
-subtitulo = tk.Label(
+tk.Label(
     ventana,
-    text="Pokémon TCG - 30th Anniversary",
+    text=(
+        "Pokémon TCG · 30th Anniversary"
+    ),
     font=(
         "Arial",
-        15
+        16
     )
-)
-
-subtitulo.pack(
+).pack(
     pady=5
 )
 
 
-descripcion = tk.Label(
+tk.Label(
     ventana,
     text=(
-        "Vigilancia de productos publicados "
-        "de la colección 30th Anniversary"
+        "Solo detecta productos publicados "
+        "de la colección"
     ),
     font=(
         "Arial",
-        12,
+        11,
         "bold"
     )
-)
-
-descripcion.pack(
+).pack(
     pady=(0, 25)
 )
 
 
 # ============================================================
-# TABLA
+# CABECERA
 # ============================================================
 
 marco = tk.Frame(
@@ -895,8 +829,8 @@ marco = tk.Frame(
 )
 
 marco.pack(
-    fill="x",
-    padx=30
+    padx=30,
+    fill="x"
 )
 
 
@@ -926,7 +860,7 @@ tk.Label(
 ).grid(
     row=0,
     column=1,
-    padx=35,
+    padx=40,
     sticky="nw"
 )
 
@@ -942,7 +876,6 @@ tk.Label(
 ).grid(
     row=0,
     column=2,
-    padx=20,
     sticky="nw"
 )
 
@@ -954,29 +887,31 @@ tk.Label(
 filas = []
 
 
-for numero, tienda in enumerate(
-    TIENDAS,
+for numero, nombre in enumerate(
+    TIENDAS.keys(),
     start=1
 ):
 
-    nombre = tk.Label(
+    etiqueta_nombre = tk.Label(
         marco,
-        text=tienda["nombre"],
+        text=nombre,
         font=(
             "Arial",
-            11
+            12,
+            "bold"
         )
     )
 
-    nombre.grid(
+
+    etiqueta_nombre.grid(
         row=numero,
         column=0,
         sticky="nw",
-        pady=15
+        pady=20
     )
 
 
-    estado = tk.Label(
+    etiqueta_estado = tk.Label(
         marco,
         text="SIN COMPROBAR",
         font=(
@@ -987,41 +922,42 @@ for numero, tienda in enumerate(
         fg="gray"
     )
 
-    estado.grid(
+
+    etiqueta_estado.grid(
         row=numero,
         column=1,
-        padx=35,
+        padx=40,
         sticky="nw",
-        pady=15
+        pady=20
     )
 
 
-    producto = tk.Label(
+    etiqueta_productos = tk.Label(
         marco,
         text="",
         font=(
             "Arial",
             9
         ),
-        wraplength=650,
         justify="left",
-        anchor="w"
+        anchor="w",
+        wraplength=650
     )
 
-    producto.grid(
+
+    etiqueta_productos.grid(
         row=numero,
         column=2,
-        padx=20,
         sticky="nw",
-        pady=10
+        pady=15
     )
 
 
     filas.append(
         {
-            "nombre": tienda["nombre"],
-            "estado": estado,
-            "producto": producto
+            "nombre": nombre,
+            "estado": etiqueta_estado,
+            "productos": etiqueta_productos
         }
     )
 
@@ -1030,26 +966,24 @@ for numero, tienda in enumerate(
 # SEPARADOR
 # ============================================================
 
-separador = tk.Frame(
+tk.Frame(
     ventana,
     height=2,
     bg="gray"
-)
-
-separador.pack(
+).pack(
     fill="x",
     padx=30,
-    pady=20
+    pady=15
 )
 
 
 # ============================================================
-# ESTADO
+# INFORMACIÓN
 # ============================================================
 
 estado_programa = tk.Label(
     ventana,
-    text="MONITOR DETENIDO",
+    text="🔴 MONITOR DETENIDO",
     font=(
         "Arial",
         14,
@@ -1063,39 +997,33 @@ estado_programa.pack(
 )
 
 
-# ============================================================
-# ÚLTIMA COMPROBACIÓN
-# ============================================================
-
-ultima_comprobacion = tk.Label(
+ultima = tk.Label(
     ventana,
     text="Última comprobación: --:--:--",
-    font=("Arial", 10)
+    font=(
+        "Arial",
+        10
+    )
 )
 
-ultima_comprobacion.pack(
-    pady=3
+ultima.pack(
+    pady=2
 )
 
 
-# ============================================================
-# PRÓXIMA COMPROBACIÓN
-# ============================================================
-
-proxima_comprobacion = tk.Label(
+proxima = tk.Label(
     ventana,
     text="Próxima comprobación: detenida",
-    font=("Arial", 10)
+    font=(
+        "Arial",
+        10
+    )
 )
 
-proxima_comprobacion.pack(
-    pady=3
+proxima.pack(
+    pady=2
 )
 
-
-# ============================================================
-# CONTADOR
-# ============================================================
 
 contador_label = tk.Label(
     ventana,
@@ -1116,18 +1044,18 @@ contador_label.pack(
 # BOTONES
 # ============================================================
 
-marco_botones = tk.Frame(
+botones = tk.Frame(
     ventana
 )
 
-marco_botones.pack(
-    pady=25
+botones.pack(
+    pady=20
 )
 
 
-boton_iniciar = tk.Button(
-    marco_botones,
-    text="INICIAR",
+tk.Button(
+    botones,
+    text="▶ INICIAR",
     font=(
         "Arial",
         12,
@@ -1135,18 +1063,16 @@ boton_iniciar = tk.Button(
     ),
     width=16,
     command=iniciar
-)
-
-boton_iniciar.grid(
+).grid(
     row=0,
     column=0,
     padx=10
 )
 
 
-boton_detener = tk.Button(
-    marco_botones,
-    text="DETENER",
+tk.Button(
+    botones,
+    text="⛔ DETENER",
     font=(
         "Arial",
         12,
@@ -1154,9 +1080,7 @@ boton_detener = tk.Button(
     ),
     width=16,
     command=detener
-)
-
-boton_detener.grid(
+).grid(
     row=0,
     column=1,
     padx=10
@@ -1174,7 +1098,7 @@ ventana.protocol(
 
 
 # ============================================================
-# EJECUTAR
+# ARRANCAR
 # ============================================================
 
 ventana.mainloop()

@@ -1,0 +1,31 @@
+name: Probar POKEMONSTOCK
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  probar:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar código
+        uses: actions/checkout@v4
+
+      - name: Instalar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar librerías
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Comprobar sintaxis
+        run: |
+          python -m py_compile app.py
+
+      - name: Comprobar librerías
+        run: |
+          python -c "import requests; import bs4; print('Librerías OK')"

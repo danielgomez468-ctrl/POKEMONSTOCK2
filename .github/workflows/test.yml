@@ -29,3 +29,8 @@ jobs:
       - name: Comprobar librerías
         run: |
           python -c "import requests; import bs4; print('Librerías OK')"
+          
+      - name: Comprobar conexión web
+        run: |
+          python -c "import requests; r=requests.get('https://www.pokemillon.com/', timeout=20); print('Pokemillon:', r.status_code)"
+          python -c "import requests; r=requests.get('https://todohits.com/', timeout=20); print('TodoHits:', r.status_code)"
